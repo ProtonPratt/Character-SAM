@@ -40,4 +40,4 @@ def create_master_index(data_root, output_file):
     print(f"Master index created at {output_file}")
 
 if __name__ == '__main__':
-    create_master_index('/scratch/pratyush.jena/Characters_Inscriptions/kannada_char_generator/output_continuous_render', 'master_index.json')
+    create_master_index('/scratch/pratyush.jena/Characters_Inscriptions/kannada_char_generator/output_continuous_render_rand', 'master_index_rand.json')
