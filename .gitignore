@@ -43,6 +43,8 @@ package-lock.json
 
 # temporary files
 generated_masks/
-finetuned_models/
+finetuned_*
 master*
 Inference_Results/
+comparison*
+inference_out*

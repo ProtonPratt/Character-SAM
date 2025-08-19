@@ -7,15 +7,11 @@ from torch.nn import functional as F
 from segment_anything.utils.transforms import ResizeLongestSide
 
 class GuidedPromptDataset(torch.utils.data.Dataset):
-    def __init__(self, index_file, img_size, pixel_mean, pixel_std, return_path=False, return_full_mask=False):
+    def __init__(self, index_file, sam_model):
         with open(index_file, 'r') as f:
             self.index = json.load(f)
-        self.transform = ResizeLongestSide(img_size)
-        self.img_size = img_size
-        self.pixel_mean = pixel_mean.cpu()
-        self.pixel_std = pixel_std.cpu()
-        self.return_path = return_path
-        self.return_full_mask = return_full_mask
+        self.transform = ResizeLongestSide(sam_model.image_encoder.img_size)
+        self.sam_model = sam_model
 
     def __len__(self):
         return len(self.index)
@@ -30,14 +26,16 @@ class GuidedPromptDataset(torch.utils.data.Dataset):
         # Preprocess image for SAM
         # Apply transform but ensure we don't exceed encoder size
         transformed_image = self.transform.apply_image(np.array(image))
-        image_tensor = torch.as_tensor(transformed_image)
+        image_tensor = torch.as_tensor(transformed_image, device=self.sam_model.device)
         image_tensor = image_tensor.permute(2, 0, 1).contiguous()
 
         # Normalize
-        x = (image_tensor - self.pixel_mean) / self.pixel_std
+        pixel_mean = self.sam_model.pixel_mean
+        pixel_std = self.sam_model.pixel_std
+        x = (image_tensor - pixel_mean) / pixel_std
 
         h, w = x.shape[-2:]
-        target_size = self.img_size
+        target_size = self.sam_model.image_encoder.img_size
 
         # Only pad, never crop
         padh = max(0, target_size - h)
@@ -56,19 +54,14 @@ class GuidedPromptDataset(torch.utils.data.Dataset):
         gt_masks_list = []
         gt_points_list = []
 
-        gt_full_masks_list = []
-
         for i, char_annotation in enumerate(record['annotations']):
             # Load the corresponding mask
             mask = Image.open(record['mask_paths'][i])
             gt_mask_np = np.array(mask)
             
-            if self.return_full_mask:
-                gt_full_masks_list.append(torch.as_tensor(gt_mask_np, dtype=torch.float))
-
             # First apply the same transform as the image (preserve aspect ratio)
             transformed_mask = self.transform.apply_image(gt_mask_np)
-            gt_mask_tensor = torch.as_tensor(transformed_mask, dtype=torch.float)
+            gt_mask_tensor = torch.as_tensor(transformed_mask, dtype=torch.float, device=self.sam_model.device)
             
             # If binary, ensure it stays binary after transformation
             if gt_mask_np.max() == 1:
@@ -111,18 +104,10 @@ class GuidedPromptDataset(torch.utils.data.Dataset):
         # Transform points
         points_np = np.array(gt_points_list)
         transformed_points = self.transform.apply_coords(points_np, original_size)
-        points_tensor = torch.as_tensor(transformed_points)
+        points_tensor = torch.as_tensor(transformed_points, device=self.sam_model.device)
 
-        output = {
+        return {
             'image': padded_image,
             'gt_masks': torch.stack(gt_masks_list), # [Num_Chars, 256, 256]
             'gt_points': points_tensor # [Num_Chars, 2]
         }
-
-        if self.return_path:
-            output['image_path'] = record['image_path']
-
-        if self.return_full_mask:
-            output['gt_full_masks'] = gt_full_masks_list
-
-        return output

@@ -128,18 +128,12 @@ def main(args):
     loss_fn = CombinedLoss()
 
     # 3. Setup Dataloader with custom collate function
-    dataset = GuidedPromptDataset(
-        index_file='master_index.json', 
-        img_size=sam.image_encoder.img_size, 
-        pixel_mean=sam.pixel_mean, 
-        pixel_std=sam.pixel_std
-    )
+    dataset = GuidedPromptDataset(index_file='master_index.json', sam_model=sam)
     train_loader = torch.utils.data.DataLoader(
         dataset, 
         batch_size=args.batch_size, 
         shuffle=True,
-        collate_fn=custom_collate_fn,  # Add custom collate function
-        num_workers=12
+        collate_fn=custom_collate_fn  # Add custom collate function
     )
 
     # 4. Training Loop
@@ -148,7 +142,7 @@ def main(args):
         epoch_loss = 0
         
         for batch in tqdm(train_loader):
-            images = batch['image'].to(device) # [B, 3, 1024, 1024]
+            images = batch['image'] # [B, 3, 1024, 1024]
             gt_masks = batch['gt_masks'] # List of [Num_Chars, 256, 256]
             gt_points = batch['gt_points'] # List of [Num_Chars, 2]
 
@@ -167,9 +161,9 @@ def main(args):
                 
                 # Loop through each character (prompt) in the image
                 for j in range(len(points_i)):
-                    prompt_point = points_i[j].unsqueeze(0).unsqueeze(0).to(device)
+                    prompt_point = points_i[j].unsqueeze(0).unsqueeze(0)
                     prompt_label = torch.tensor([[1]], device=device) # Foreground point
-                    target_mask = masks_i[j].unsqueeze(0).unsqueeze(0).to(device) # [1, 1, 256, 256]
+                    target_mask = masks_i[j].unsqueeze(0).unsqueeze(0) # [1, 1, 256, 256]
                     
                     num_chars_in_batch += 1
 

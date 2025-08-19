@@ -1,4 +1,4 @@
-# train.py
+# train_cached.py
 import torch
 import argparse
 from tqdm import tqdm
@@ -88,11 +88,13 @@ def custom_collate_fn(batch):
     images = []
     gt_masks = []
     gt_points = []
+    image_paths = []
     
     for sample in batch:
         images.append(sample['image'])
         gt_masks.append(sample['gt_masks'])  # Keep as list - don't stack
         gt_points.append(sample['gt_points'])  # Keep as list - don't stack
+        image_paths.append(sample['image_path'])
     
     # Only stack images since they have fixed dimensions
     images = torch.stack(images, dim=0)
@@ -100,7 +102,8 @@ def custom_collate_fn(batch):
     return {
         'image': images,
         'gt_masks': gt_masks,  # List of tensors with different sizes
-        'gt_points': gt_points  # List of tensors with different sizes
+        'gt_points': gt_points,  # List of tensors with different sizes
+        'image_path': image_paths
     }
 
 def main(args):
@@ -132,7 +135,8 @@ def main(args):
         index_file='master_index.json', 
         img_size=sam.image_encoder.img_size, 
         pixel_mean=sam.pixel_mean, 
-        pixel_std=sam.pixel_std
+        pixel_std=sam.pixel_std,
+        return_path=True
     )
     train_loader = torch.utils.data.DataLoader(
         dataset, 
@@ -143,6 +147,7 @@ def main(args):
     )
 
     # 4. Training Loop
+    embedding_cache = {}
     for epoch in range(args.epochs):
         sam.train()
         epoch_loss = 0
@@ -151,11 +156,21 @@ def main(args):
             images = batch['image'].to(device) # [B, 3, 1024, 1024]
             gt_masks = batch['gt_masks'] # List of [Num_Chars, 256, 256]
             gt_points = batch['gt_points'] # List of [Num_Chars, 2]
+            image_paths = batch['image_path']
 
             optimizer.zero_grad()
 
-            with torch.no_grad():
-                image_embeddings = sam.image_encoder(images)
+            # Get image embeddings from cache or compute them
+            image_embeddings = []
+            for i, image_path in enumerate(image_paths):
+                if image_path in embedding_cache:
+                    image_embeddings.append(embedding_cache[image_path])
+                else:
+                    with torch.no_grad():
+                        embedding = sam.image_encoder(images[i].unsqueeze(0))
+                        embedding_cache[image_path] = embedding.cpu() # Cache on CPU
+                        image_embeddings.append(embedding)
+            image_embeddings = torch.cat(image_embeddings, dim=0).to(device)
 
             batch_loss = 0
             num_chars_in_batch = 0
