@@ -48,3 +48,4 @@ master*
 Inference_Results/
 comparison*
 inference_out*
+wandb/
